@@ -862,7 +862,7 @@ def dewarp(img):
 
     if len(spans) < 1:
         print ('skipping', name, 'because only', len(spans), 'spans')
-        continue
+        return None
 
     span_points = sample_spans(small.shape, spans)
 
