@@ -773,7 +773,7 @@ def get_page_dims(corners, rough_dims, params):
     res = scipy.optimize.minimize(objective, dims, method='Powell')
     dims = res.x
 
-    print '  got page dims', dims[0], 'x', dims[1]
+    print ('  got page dims', dims[0], 'x', dims[1])
 
     return dims
 
@@ -904,7 +904,7 @@ def main():
     for imgfile in sys.argv[1:]:
 
         img = cv2.imread(imgfile)
-        
+
         outfile = dewarp(img)
 
         outfiles.append(outfile)
