@@ -736,20 +736,20 @@ def optimize_params(name, small, dstpoints, span_counts, params):
         ppts = project_keypoints(pvec, keypoint_index)
         return np.sum((dstpoints - ppts)**2)
 
-    print '  initial objective is', objective(params)
+    print ('  initial objective is', objective(params))
 
     if DEBUG_LEVEL >= 1:
         projpts = project_keypoints(params, keypoint_index)
         display = draw_correspondences(small, dstpoints, projpts)
         debug_show(name, 4, 'keypoints before', display)
 
-    print '  optimizing', len(params), 'parameters...'
+    print ('  optimizing', len(params), 'parameters...')
     start = datetime.datetime.now()
     res = scipy.optimize.minimize(objective, params,
                                   method='Powell')
     end = datetime.datetime.now()
-    print '  optimization took', round((end-start).total_seconds(), 2), 'sec.'
-    print '  final objective is', res.fun
+    print ('  optimization took', round((end-start).total_seconds(), 2), 'sec.')
+    print ('  final objective is', res.fun)
     params = res.x
 
     if DEBUG_LEVEL >= 1:
@@ -786,7 +786,7 @@ def remap_image(name, img, small, page_dims, params):
     width = round_nearest_multiple(height * page_dims[0] / page_dims[1],
                                    REMAP_DECIMATE)
 
-    print '  output will be {}x{}'.format(width, height)
+    print ('  output will be {}x{}'.format(width, height))
 
     height_small = height / REMAP_DECIMATE
     width_small = width / REMAP_DECIMATE
@@ -837,11 +837,63 @@ def remap_image(name, img, small, page_dims, params):
 
     return threshfile
 
+def dewarp(img):
+    small = resize_to_screen(img)
+    basename = os.path.basename(imgfile)
+    name, _ = os.path.splitext(basename)
+
+    print ('loaded', basename, 'with size', imgsize(img))
+    print ('and resized to', imgsize(small))
+
+    if DEBUG_LEVEL >= 3:
+        debug_show(name, 0.0, 'original', small)
+
+    pagemask, page_outline = get_page_extents(small)
+
+    cinfo_list = get_contours(name, small, pagemask, 'text')
+    spans = assemble_spans(name, small, pagemask, cinfo_list)
+
+    if len(spans) < 3:
+        print ('  detecting lines because only', len(spans), 'text spans')
+        cinfo_list = get_contours(name, small, pagemask, 'line')
+        spans2 = assemble_spans(name, small, pagemask, cinfo_list)
+        if len(spans2) > len(spans):
+            spans = spans2
+
+    if len(spans) < 1:
+        print ('skipping', name, 'because only', len(spans), 'spans')
+        continue
+
+    span_points = sample_spans(small.shape, spans)
+
+    print ('  got', len(spans), 'spans')
+    print ('with', sum([len(pts) for pts in span_points]), 'points.')
+
+    corners, ycoords, xcoords = keypoints_from_samples(name, small,
+                                                    pagemask,
+                                                    page_outline,
+                                                    span_points)
+
+    rough_dims, span_counts, params = get_default_params(corners,
+                                                        ycoords, xcoords)
+
+    dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) +
+                        tuple(span_points))
+
+    params = optimize_params(name, small,
+                            dstpoints,
+                            span_counts, params)
+
+    page_dims = get_page_dims(corners, rough_dims, params)
+
+    return remap_image(name, img, small, page_dims, params)
+
+
 
 def main():
 
     if len(sys.argv) < 2:
-        print 'usage:', sys.argv[0], 'IMAGE1 [IMAGE2 ...]'
+        print ('usage:', sys.argv[0], 'IMAGE1 [IMAGE2 ...]')
         sys.exit(0)
 
     if DEBUG_LEVEL > 0 and DEBUG_OUTPUT != 'file':
@@ -852,63 +904,15 @@ def main():
     for imgfile in sys.argv[1:]:
 
         img = cv2.imread(imgfile)
-        small = resize_to_screen(img)
-        basename = os.path.basename(imgfile)
-        name, _ = os.path.splitext(basename)
-
-        print 'loaded', basename, 'with size', imgsize(img),
-        print 'and resized to', imgsize(small)
-
-        if DEBUG_LEVEL >= 3:
-            debug_show(name, 0.0, 'original', small)
-
-        pagemask, page_outline = get_page_extents(small)
-
-        cinfo_list = get_contours(name, small, pagemask, 'text')
-        spans = assemble_spans(name, small, pagemask, cinfo_list)
-
-        if len(spans) < 3:
-            print '  detecting lines because only', len(spans), 'text spans'
-            cinfo_list = get_contours(name, small, pagemask, 'line')
-            spans2 = assemble_spans(name, small, pagemask, cinfo_list)
-            if len(spans2) > len(spans):
-                spans = spans2
-
-        if len(spans) < 1:
-            print 'skipping', name, 'because only', len(spans), 'spans'
-            continue
-
-        span_points = sample_spans(small.shape, spans)
-
-        print '  got', len(spans), 'spans',
-        print 'with', sum([len(pts) for pts in span_points]), 'points.'
-
-        corners, ycoords, xcoords = keypoints_from_samples(name, small,
-                                                           pagemask,
-                                                           page_outline,
-                                                           span_points)
-
-        rough_dims, span_counts, params = get_default_params(corners,
-                                                             ycoords, xcoords)
-
-        dstpoints = np.vstack((corners[0].reshape((1, 1, 2)),) +
-                              tuple(span_points))
-
-        params = optimize_params(name, small,
-                                 dstpoints,
-                                 span_counts, params)
-
-        page_dims = get_page_dims(corners, rough_dims, params)
-
-        outfile = remap_image(name, img, small, page_dims, params)
+        
+        outfile = dewarp(img)
 
         outfiles.append(outfile)
 
-        print '  wrote', outfile
-        print
+        print (')  wrote', outfile)    
 
-    print 'to convert to PDF (requires ImageMagick):'
-    print '  convert -compress Group4 ' + ' '.join(outfiles) + ' output.pdf'
+    print ('to convert to PDF (requires ImageMagick):')
+    print ('  convert -compress Group4 ' + ' '.join(outfiles) + ' output.pdf')
 
 
 if __name__ == '__main__':
